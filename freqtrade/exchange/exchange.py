@@ -9,7 +9,7 @@ import logging
 import signal
 from collections.abc import Coroutine, Generator
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from math import floor, isnan
 from threading import Lock
 from typing import Any, Literal, TypeGuard, TypeVar
@@ -655,7 +655,7 @@ class Exchange:
             if isinstance(markets, Exception):
                 raise markets
             return None
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             logger.warning("Could not load markets. Reason: %s", e)
             raise TemporaryError from e
 
@@ -2220,7 +2220,7 @@ class Exchange:
             _params = params if params else {}
             my_trades = self._api.fetch_my_trades(
                 pair,
-                int((since.replace(tzinfo=timezone.utc).timestamp() - 5) * 1000),
+                int((since.replace(tzinfo=UTC).timestamp() - 5) * 1000),
                 params=_params,
             )
             matched_trades = [trade for trade in my_trades if trade["order"] == order_id]
@@ -3347,7 +3347,7 @@ class Exchange:
         if not filename.parent.is_dir():
             filename.parent.mkdir(parents=True)
         data = {
-            "updated": datetime.now(timezone.utc),
+            "updated": datetime.now(UTC),
             "data": tiers,
         }
         file_dump_json(filename, data)
@@ -3369,7 +3369,7 @@ class Exchange:
                 updated = tiers.get("updated")
                 if updated:
                     updated_dt = parser.parse(updated)
-                    if updated_dt < datetime.now(timezone.utc) - cache_time:
+                    if updated_dt < datetime.now(UTC) - cache_time:
                         logger.info("Cached leverage tiers are outdated. Will update.")
                         return None
                 return tiers.get("data")
@@ -3428,11 +3428,20 @@ class Exchange:
             # Find the appropriate tier based on stake_amount
             prior_max_lev = None
             for tier in pair_tiers:
+                # Adjust notional by leverage to do a proper comparison
                 min_stake = tier["minNotional"] / (prior_max_lev or tier["maxLeverage"])
                 max_stake = tier["maxNotional"] / tier["maxLeverage"]
                 prior_max_lev = tier["maxLeverage"]
-                # Adjust notional by leverage to do a proper comparison
                 if min_stake <= stake_amount <= max_stake:
+                    return tier["maxLeverage"]
+                if stake_amount < min_stake and stake_amount <= max_stake:
+                    # TODO: Remove this warning eventually
+                    # Code could be simplified by removing the check for min-stake in the above
+                    # condition, making this branch unnecessary.
+                    logger.warning(
+                        f"Fallback to next higher leverage tier for {pair}, stake: {stake_amount}, "
+                        f"min_stake: {min_stake}."
+                    )
                     return tier["maxLeverage"]
 
             #     else:  # if on the last tier
@@ -3584,7 +3593,7 @@ class Exchange:
         mark_price_type = CandleType.from_string(self._ft_has["mark_ohlcv_price"])
 
         if not close_date:
-            close_date = datetime.now(timezone.utc)
+            close_date = datetime.now(UTC)
         since_ms = dt_ts(timeframe_to_prev_date(timeframe, open_date))
 
         mark_comb: PairWithTimeframe = (pair, timeframe, mark_price_type)
