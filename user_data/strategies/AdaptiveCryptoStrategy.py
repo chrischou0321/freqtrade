@@ -170,32 +170,21 @@ class AdaptiveCryptoStrategy(IStrategy):
     def _detect_market_regime(self, dataframe: DataFrame) -> pd.Series:
         """
         市場狀態檢測：趨勢市 vs 震盪市
-        
+
         趨勢市特徵：
         1. ATR持續擴大 (atr_expansion > threshold)
-        2. EMA快慢線分離度大 (ema_separation > threshold)  
+        2. EMA快慢線分離度大 (ema_separation > threshold)
         3. 波動率上升 (volatility_ratio > threshold)
-        
-        至少滿足2個條件判定為趨勢市
+
+        至少滿足2個條件判定為趨勢市（vectorized 版本，速度 100x+）
         """
-        # 初始化為震盪市
-        regime = pd.Series(0, index=dataframe.index)  # 0=consolidation, 1=trending
-        
-        # 確保有足夠數據
-        valid_idx = dataframe.index[self.lookback_period.value:]
-        
-        for idx in valid_idx:
-            trending_conditions = [
-                dataframe.loc[idx, 'atr_expansion'] > self.atr_expansion_threshold.value,
-                dataframe.loc[idx, 'ema_separation'] > self.ema_separation_threshold.value,
-                dataframe.loc[idx, 'volatility_ratio'] > self.volatility_threshold.value
-            ]
-            
-            if sum(trending_conditions) >= 2:
-                regime.loc[idx] = 1  # trending
-            else:
-                regime.loc[idx] = 0  # consolidation
-                
+        cond_atr = (dataframe['atr_expansion'] > self.atr_expansion_threshold.value).astype(int)
+        cond_ema = (dataframe['ema_separation'] > self.ema_separation_threshold.value).astype(int)
+        cond_vol = (dataframe['volatility_ratio'] > self.volatility_threshold.value).astype(int)
+
+        # 三個條件中滿足 >= 2 個 → 趨勢市(1)，否則震盪市(0)
+        regime = ((cond_atr + cond_ema + cond_vol) >= 2).astype(int)
+
         return regime
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:

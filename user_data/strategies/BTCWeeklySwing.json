@@ -1,0 +1,31 @@
+{
+  "strategy_name": "BTCWeeklySwing",
+  "params": {
+    "roi": {
+      "0": 0.15
+    },
+    "max_open_trades": {
+      "max_open_trades": 1
+    },
+    "buy": {
+      "adx_min": 20,
+      "breakout_bars": 11,
+      "rsi_max": 75,
+      "rsi_min": 31,
+      "vol_ratio": 1.7
+    },
+    "sell": {},
+    "protection": {},
+    "stoploss": {
+      "stoploss": -0.057
+    },
+    "trailing": {
+      "trailing_stop": true,
+      "trailing_stop_positive": 0.157,
+      "trailing_stop_positive_offset": 0.193,
+      "trailing_only_offset_is_reached": false
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2026-04-18 12:13:37.290074+00:00"
+}
