@@ -116,3 +116,8 @@ target/
 !config_examples/config_freqai.example.json
 
 docker-compose-*.yml
+
+# Local-only artifacts (chriscc fork)
+desktop.ini
+*.bak
+*.whl
