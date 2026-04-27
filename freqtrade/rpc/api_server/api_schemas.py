@@ -1,7 +1,7 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, RootModel, SerializeAsAny, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, RootModel, SerializeAsAny, model_validator
 
 from freqtrade.constants import DL_DATA_TIMEFRAMES, IntOrInf
 from freqtrade.enums import MarginMode, OrderTypeValues, SignalDirection, TradingMode
@@ -157,15 +157,31 @@ class Profit(BaseModel):
     winrate: float
     expectancy: float
     expectancy_ratio: float
+    sharpe: float
+    sortino: float
+    sqn: float
+    calmar: float
+    cagr: float
     max_drawdown: float
     max_drawdown_abs: float
     max_drawdown_start: str
     max_drawdown_start_timestamp: int
     max_drawdown_end: str
     max_drawdown_end_timestamp: int
+    current_drawdown: float
+    current_drawdown_abs: float
+    current_drawdown_high: float
+    current_drawdown_start: str
+    current_drawdown_start_timestamp: int
     trading_volume: float | None = None
     bot_start_timestamp: int
     bot_start_date: str
+
+
+class ProfitAll(BaseModel):
+    all: Profit
+    long: Profit | None = None
+    short: Profit | None = None
 
 
 class SellReason(BaseModel):
@@ -218,6 +234,7 @@ class ShowConfig(BaseModel):
     api_version: float
     dry_run: bool
     trading_mode: str
+    margin_mode: str
     short_allowed: bool
     stake_currency: str
     stake_amount: str
@@ -328,6 +345,8 @@ class TradeSchema(BaseModel):
 
     min_rate: float | None = None
     max_rate: float | None = None
+    nr_of_successful_entries: int
+    nr_of_successful_exits: int
     has_open_orders: bool
     orders: list[OrderSchema]
 
@@ -412,6 +431,7 @@ class ForceExitPayload(BaseModel):
     tradeid: str | int
     ordertype: OrderTypeValues | None = None
     amount: float | None = None
+    price: float | None = None
 
 
 class BlacklistPayload(BaseModel):
@@ -492,6 +512,8 @@ class DownloadDataPayload(ExchangeModePayloadMixin, BaseModel):
     timerange: str | None = None
     erase: bool = False
     download_trades: bool = False
+    candle_types: list[str] | None = None
+    prepend_data: bool = False
 
     @model_validator(mode="before")
     def check_mutually_exclusive(cls, values):
@@ -505,10 +527,59 @@ class FreqAIModelListResponse(BaseModel):
     freqaimodels: list[str]
 
 
+class __StrategyParameter(BaseModel):
+    param_type: str
+    name: str
+    space: str
+    load: bool
+    optimize: bool
+
+
+class IntParameter(__StrategyParameter):
+    param_type: Literal["IntParameter"]
+    value: int
+    low: int
+    high: int
+
+
+class RealParameter(__StrategyParameter):
+    param_type: Literal["RealParameter"]
+    value: float
+    low: float
+    high: float
+
+
+class DecimalParameter(__StrategyParameter):
+    param_type: Literal["DecimalParameter"]
+    value: float
+    low: float
+    high: float
+    decimals: int
+
+
+class BooleanParameter(__StrategyParameter):
+    param_type: Literal["BooleanParameter"]
+    value: bool | None
+    opt_range: list[bool]
+
+
+class CategoricalParameter(__StrategyParameter):
+    param_type: Literal["CategoricalParameter"]
+    value: Any
+    opt_range: list[Any]
+
+
+AllParameters = Annotated[
+    BooleanParameter | CategoricalParameter | DecimalParameter | IntParameter | RealParameter,
+    Field(discriminator="param_type"),
+]
+
+
 class StrategyResponse(BaseModel):
     strategy: str
-    code: str
     timeframe: str | None
+    params: list[AllParameters] = Field(default_factory=list)
+    code: str
 
 
 class AvailablePairs(BaseModel):
@@ -626,9 +697,25 @@ class MarketResponse(BaseModel):
     exchange_id: str
 
 
+class CpuInfo(BaseModel):
+    cpu: int
+    pct: float
+
+
 class SysInfo(BaseModel):
-    cpu_pct: list[float]
-    ram_pct: float
+    """Information about the system running the bot based on psutil output/measurements
+
+    Note: cpu_pct is deprecated and may be removed in a future release. Use cpu_load instead.
+    """
+
+    cpu_pct: list[float] = Field(
+        default=[], deprecated=True, description="Use cpu_load object instead"
+    )
+    cpu_load: list[CpuInfo]
+    cpu_load_avg: dict[str, float]
+    cpu_count: int = Field(description="Number of logical CPUs as provided by psutil")
+    cpu_avg: float = Field(description="Average CPU load across all cores as provided by psutil")
+    ram_pct: float = Field(description="RAM usage percentage as provided by psutil")
 
 
 class Health(BaseModel):

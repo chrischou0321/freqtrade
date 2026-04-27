@@ -74,9 +74,10 @@ def combined_dataframes_with_rel_mean(
     df_comb = combine_dataframes_by_column(data, column)
     # Trim dataframes to the given timeframe
     df_comb = df_comb.iloc[(df_comb.index >= fromdt) & (df_comb.index < todt)]
+    rel_mean = df_comb.pct_change().mean(axis=1).fillna(0).cumsum()
     df_comb["count"] = df_comb.count(axis=1)
     df_comb["mean"] = df_comb.mean(axis=1)
-    df_comb["rel_mean"] = df_comb["mean"].pct_change().fillna(0).cumsum()
+    df_comb["rel_mean"] = rel_mean
     return df_comb[["mean", "rel_mean", "count"]]
 
 
@@ -143,6 +144,20 @@ def _calc_drawdown_series(
         max_drawdown_df["drawdown_relative"] = (
             max_drawdown_df["high_value"] - max_drawdown_df["cumulative"]
         ) / max_drawdown_df["high_value"]
+
+    # Add zero row at start to account for edge-cases with no winning / losing trades - so high/low
+    # will be 0.0 in such cases.
+    zero_row = pd.DataFrame(
+        {
+            "cumulative": [0.0],
+            "high_value": [0.0],
+            "drawdown": [0.0],
+            "drawdown_relative": [0.0],
+            "date": [profit_results.loc[0, date_col]],
+        }
+    )
+
+    max_drawdown_df = pd.concat([zero_row, max_drawdown_df], ignore_index=True)
     return max_drawdown_df
 
 
@@ -174,12 +189,18 @@ def calculate_underwater(
 
 @dataclass()
 class DrawDownResult:
+    # Max drawdown fields
     drawdown_abs: float = 0.0
     high_date: pd.Timestamp = None
     low_date: pd.Timestamp = None
     high_value: float = 0.0
     low_value: float = 0.0
     relative_account_drawdown: float = 0.0
+    # Current drawdown fields
+    current_high_date: pd.Timestamp = None
+    current_high_value: float = 0.0
+    current_drawdown_abs: float = 0.0
+    current_relative_account_drawdown: float = 0.0
 
 
 def calculate_max_drawdown(
@@ -191,43 +212,60 @@ def calculate_max_drawdown(
     relative: bool = False,
 ) -> DrawDownResult:
     """
-    Calculate max drawdown and the corresponding close dates
-    :param trades: DataFrame containing trades (requires columns close_date and profit_ratio)
+    Calculate max drawdown and current drawdown with corresponding dates
+    :param trades: DataFrame containing trades (requires columns close_date and profit_abs)
     :param date_col: Column in DataFrame to use for dates (defaults to 'close_date')
     :param value_col: Column in DataFrame to use for values (defaults to 'profit_abs')
     :param starting_balance: Portfolio starting balance - properly calculate relative drawdown.
+    :param relative: If True, use relative drawdown for max calculation instead of absolute
     :return: DrawDownResult object
              with absolute max drawdown, high and low time and high and low value,
-             and the relative account drawdown
+             relative account drawdown, and current drawdown information.
     :raise: ValueError if trade-dataframe was found empty.
     """
     if len(trades) == 0:
         raise ValueError("Trade dataframe empty.")
+
     profit_results = trades.sort_values(date_col).reset_index(drop=True)
     max_drawdown_df = _calc_drawdown_series(
         profit_results, date_col=date_col, value_col=value_col, starting_balance=starting_balance
     )
+    # max_drawdown_df has an extra zero row at the start
 
+    # Calculate maximum drawdown
     idxmin = (
         max_drawdown_df["drawdown_relative"].idxmax()
         if relative
         else max_drawdown_df["drawdown"].idxmin()
     )
-
     high_idx = max_drawdown_df.iloc[: idxmin + 1]["high_value"].idxmax()
-    high_date = profit_results.loc[high_idx, date_col]
-    low_date = profit_results.loc[idxmin, date_col]
-    high_val = max_drawdown_df.loc[high_idx, "cumulative"]
-    low_val = max_drawdown_df.loc[idxmin, "cumulative"]
-    max_drawdown_rel = max_drawdown_df.loc[idxmin, "drawdown_relative"]
+    high_date = profit_results.at[max(high_idx - 1, 0), date_col]
+    low_date = profit_results.at[max(idxmin - 1, 0), date_col]
+    high_val = max_drawdown_df.at[high_idx, "cumulative"]
+    low_val = max_drawdown_df.at[idxmin, "cumulative"]
+    max_drawdown_rel = max_drawdown_df.at[idxmin, "drawdown_relative"]
+
+    # Calculate current drawdown
+    current_high_idx = max_drawdown_df["high_value"].iloc[:-1].idxmax()
+    current_high_date = profit_results.at[max(current_high_idx - 1, 0), date_col]
+    current_high_value = max_drawdown_df.iloc[-1]["high_value"]
+    current_cumulative = max_drawdown_df.iloc[-1]["cumulative"]
+    current_drawdown_abs = current_high_value - current_cumulative
+    current_drawdown_relative = max_drawdown_df.iloc[-1]["drawdown_relative"]
 
     return DrawDownResult(
+        # Max drawdown
         drawdown_abs=abs(max_drawdown_df.loc[idxmin, "drawdown"]),
         high_date=high_date,
         low_date=low_date,
         high_value=high_val,
         low_value=low_val,
         relative_account_drawdown=max_drawdown_rel,
+        # Current drawdown
+        current_high_date=current_high_date,
+        current_high_value=current_high_value,
+        current_drawdown_abs=current_drawdown_abs,
+        current_relative_account_drawdown=current_drawdown_relative,
     )
 
 
@@ -258,7 +296,7 @@ def calculate_cagr(days_passed: int, starting_balance: float, final_balance: flo
     :param final_balance: Final balance to calculate CAGR against
     :return: CAGR
     """
-    if final_balance < 0:
+    if (final_balance < 0) or (starting_balance <= 0) or (days_passed <= 0):
         # With leveraged trades, final_balance can become negative.
         return 0
     return (final_balance / starting_balance) ** (1 / (days_passed / 365)) - 1
@@ -296,7 +334,10 @@ def calculate_expectancy(trades: pd.DataFrame) -> tuple[float, float]:
 
 
 def calculate_sortino(
-    trades: pd.DataFrame, min_date: datetime, max_date: datetime, starting_balance: float
+    trades: pd.DataFrame,
+    min_date: datetime | None,
+    max_date: datetime | None,
+    starting_balance: float,
 ) -> float:
     """
     Calculate sortino
@@ -324,7 +365,10 @@ def calculate_sortino(
 
 
 def calculate_sharpe(
-    trades: pd.DataFrame, min_date: datetime, max_date: datetime, starting_balance: float
+    trades: pd.DataFrame,
+    min_date: datetime | None,
+    max_date: datetime | None,
+    starting_balance: float,
 ) -> float:
     """
     Calculate sharpe
@@ -351,7 +395,10 @@ def calculate_sharpe(
 
 
 def calculate_calmar(
-    trades: pd.DataFrame, min_date: datetime, max_date: datetime, starting_balance: float
+    trades: pd.DataFrame,
+    min_date: datetime | None,
+    max_date: datetime | None,
+    starting_balance: float,
 ) -> float:
     """
     Calculate calmar

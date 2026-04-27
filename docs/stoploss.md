@@ -26,21 +26,18 @@ These modes can be configured with these values:
 Stoploss on exchange is only supported for the following exchanges, and not all exchanges support both stop-limit and stop-market.
 The Order-type will be ignored if only one mode is available.
 
-| Exchange | stop-loss type |
-|----------|-------------|
-| Binance  | limit |
-| Binance Futures  | market, limit |
-| Bingx    | market, limit |
-| HTX      | limit |
-| kraken   | market, limit |
-| Gate     | limit |
-| Okx      | limit |
-| Kucoin   | stop-limit, stop-market|
-| Hyperliquid (futures only)   | limit |
+??? info "Supported exchanges and stoploss types"
+    
+    --8<-- "includes/exchange-features.md"
 
 !!! Note "Tight stoploss"
-    <ins>Do not set too low/tight stoploss value when using stop loss on exchange!</ins>  
+    Do not set too low/tight stoploss value when using stop loss on exchange!  
     If set to low/tight you will have greater risk of missing fill on the order and stoploss will not work.
+
+!!! Warning "Loose stoploss"
+    Using stoploss on exchange with a very wide stoploss (e.g. -1) may fail to place the stoploss order on exchange due to exchange limitations.
+    In that case, the bot will fallback to using the `emergency_exit` order type to place a market order as placing the stoploss order failed.
+    Freqtrade currently does not implement a limitation to avoid this situation, so please ensure your stoploss values are within reasonable limits for your exchange or disable stoploss on exchange.
 
 ### stoploss_on_exchange and stoploss_on_exchange_limit_ratio
 
@@ -69,9 +66,10 @@ This same logic will reapply a stoploss order on the exchange should you cancel 
 ### stoploss_price_type
 
 !!! Warning "Only applies to futures"
-    `stoploss_price_type` only applies to futures markets (on exchanges where it's available).
+    `stoploss_price_type` only applies to futures markets (on exchanges where it's available).  
     Freqtrade will perform a validation of this setting on startup, failing to start if an invalid setting for your exchange has been selected.
-    Supported price types are gonna differs between each exchanges. Please check with your exchange on which price types it supports.
+    Supported price types are gonna differs between each exchanges. Please check with your exchange on which price types it supports.  
+    In spot markets, this setting is ignored and not validated, as most exchanges only support one price type for stoploss orders on spot markets.
 
 Stoploss on exchange on futures markets can trigger on different price types.
 The naming for these prices in exchange terminology often varies, but is usually something around "last" (or "contract price" ), "mark" and "index".
